@@ -1,0 +1,127 @@
+name: Claude-Code Self-Customizer
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      force_iteration:
+        description: 'Force run iteration regardless of rate limits'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  CLAUDE_MAX_ITERATIONS: 5
+  CLAUDE_RESET_HOURS: 5
+
+jobs:
+  claude-evolution:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Check rate limits
+      id: rate_check
+      run: |
+        # Load current memory to check iteration count and timing
+        if [ -f "runtime/claude-memory.json" ]; then
+          CURRENT_ITERATION=$(jq -r '.iteration // 0' runtime/claude-memory.json)
+          echo "current_iteration=$CURRENT_ITERATION" >> $GITHUB_OUTPUT
+          
+          # Check if we're within rate limits (simplified logic)
+          if [ "$CURRENT_ITERATION" -ge "$CLAUDE_MAX_ITERATIONS" ] && [ "${{ github.event.inputs.force_iteration }}" != "true" ]; then
+            echo "Rate limit reached. Skipping execution."
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "No memory found. Starting fresh."
+          echo "current_iteration=0" >> $GITHUB_OUTPUT
+          echo "should_run=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build Claude-Code container
+      if: steps.rate_check.outputs.should_run == 'true'
+      run: |
+        docker build -f docker/Dockerfile -t claude-code:latest .
+
+    - name: Run Claude-Code iteration
+      if: steps.rate_check.outputs.should_run == 'true'
+      env:
+        CLAUDE_ITERATION: ${{ steps.rate_check.outputs.current_iteration }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Run the Claude-Code container
+        docker run --rm \
+          -v ${{ github.workspace }}:/workspace \
+          -e CLAUDE_ITERATION \
+          -e GITHUB_TOKEN \
+          claude-code:latest
+
+    - name: Commit and push changes
+      if: steps.rate_check.outputs.should_run == 'true'
+      run: |
+        git config --local user.email "claude-code@anthropic.com"
+        git config --local user.name "Claude-Code CI"
+        
+        # Check if there are changes to commit
+        if [ -n "$(git status --porcelain)" ]; then
+          git add .
+          git commit -m "🤖 Claude-Code automated iteration ${{ steps.rate_check.outputs.current_iteration }}
+
+Recursive self-improvement cycle
+
+Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Iteration: ${{ steps.rate_check.outputs.current_iteration }}
+
+🧠 Generated with Claude-Code CI
+Co-Authored-By: Claude <noreply@anthropic.com>"
+          
+          # Push changes
+          git push origin main
+          echo "✅ Changes pushed to repository"
+        else
+          echo "📭 No changes to commit"
+        fi
+
+    - name: Rate limit notification
+      if: steps.rate_check.outputs.should_run == 'false'
+      run: |
+        echo "⏱️ Rate limit reached. Claude-Code will resume after reset period."
+        echo "Current iteration: ${{ steps.rate_check.outputs.current_iteration }}"
+        echo "Max iterations: $CLAUDE_MAX_ITERATIONS"
+
+    - name: Upload iteration logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: claude-code-logs-${{ steps.rate_check.outputs.current_iteration }}
+        path: |
+          log/
+          runtime/
+        retention-days: 30
+
+    - name: Post-execution summary
+      if: steps.rate_check.outputs.should_run == 'true'
+      run: |
+        echo "🎯 Claude-Code iteration ${{ steps.rate_check.outputs.current_iteration }} completed"
+        echo "📊 Status: Success"
+        echo "🔄 Next iteration will run on next trigger (if within rate limits)"
+        
+        # Display memory status
+        if [ -f "runtime/claude-memory.json" ]; then
+          echo "🧠 Current memory status:"
+          jq '.iteration, .last_prompt_summary' runtime/claude-memory.json
+        fi
