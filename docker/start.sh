@@ -143,7 +143,7 @@ main() {
     execute_claude
     commit_changes
     
-    echo "🎯 Iteration $CURRENT_ITERATION completed"
+    /workspace/Script/speak.sh "Iteration $CURRENT_ITERATION completed"
 }
 
 # Execute main function

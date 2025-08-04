@@ -1,0 +1,406 @@
+name: Production Deployment Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install server dependencies
+      run: |
+        cd server
+        npm ci
+        
+    - name: Install web app dependencies
+      run: |
+        cd web-app
+        npm ci
+        
+    - name: Install mobile app dependencies
+      run: |
+        cd mobile-app
+        npm ci
+        
+    - name: Install test dependencies
+      run: |
+        cd tests
+        npm ci
+        
+    - name: Install Python dependencies
+      run: |
+        cd runtime/claude-api
+        pip install -r requirements.txt
+        
+    - name: Run linter
+      run: |
+        cd server && npm run lint
+        cd ../web-app && npm run lint
+        cd ../mobile-app && npm run lint
+        
+    - name: Run type checking
+      run: |
+        cd server && npm run type-check
+        cd ../web-app && npm run type-check
+        cd ../mobile-app && npm run type-check
+        
+    - name: Run unit tests
+      run: |
+        cd server && npm test
+        cd ../web-app && npm test
+        cd ../mobile-app && npm test
+        
+    - name: Run integration tests
+      run: |
+        cd tests && npm run test:integration
+        
+    - name: Test TTS system
+      run: |
+        cd Script
+        bash tts.sh config
+        python3 tts.py config
+        
+    - name: Test Claude API integration
+      env:
+        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+      run: |
+        cd runtime/claude-api
+        python3 -c "from claude_client import ClaudeAPIClient; print('Claude API client import successful')"
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        
+    - name: Install dependencies
+      run: |
+        cd server && npm ci
+        cd ../web-app && npm ci
+        cd ../mobile-app && npm ci
+        
+    - name: Run npm audit
+      run: |
+        cd server && npm audit --audit-level moderate
+        cd ../web-app && npm audit --audit-level moderate
+        cd ../mobile-app && npm audit --audit-level moderate
+        
+    - name: Run Snyk security scan
+      uses: snyk/actions/node@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high
+        
+    - name: Run ESLint security scan
+      run: |
+        cd server && npx eslint . --ext .js --config .eslintrc.security.js
+        cd ../web-app && npx eslint . --ext .js,.jsx,.ts,.tsx --config .eslintrc.security.js
+
+  build-web:
+    name: Build Web Application
+    runs-on: ubuntu-latest
+    needs: [test, security-scan]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: |
+        cd web-app
+        npm ci
+        
+    - name: Build web application
+      run: |
+        cd web-app
+        npm run build
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: web-build
+        path: web-app/.next/
+        retention-days: 1
+
+  build-mobile:
+    name: Build Mobile Applications
+    runs-on: ubuntu-latest
+    needs: [test, security-scan]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: |
+        cd mobile-app
+        npm ci
+        
+    - name: Build mobile bundle
+      run: |
+        cd mobile-app
+        npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle
+        
+    - name: Upload mobile artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: mobile-build
+        path: mobile-app/android/app/src/main/assets/
+        retention-days: 1
+
+  performance-test:
+    name: Performance Testing
+    runs-on: ubuntu-latest
+    needs: [build-web]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        
+    - name: Install server dependencies
+      run: |
+        cd server
+        npm ci
+        
+    - name: Download web build
+      uses: actions/download-artifact@v4
+      with:
+        name: web-build
+        path: web-app/.next/
+        
+    - name: Start server for testing
+      run: |
+        cd server
+        npm start &
+        sleep 10
+        
+    - name: Run Lighthouse performance test
+      uses: treosh/lighthouse-ci-action@v10
+      with:
+        configPath: './lighthouse.config.js'
+        uploadArtifacts: true
+        temporaryPublicStorage: true
+        
+    - name: Run load testing
+      run: |
+        cd tests
+        npm run test:performance
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-web, build-mobile, performance-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: staging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: web-build
+        path: web-app/.next/
+        
+    - name: Deploy web app to Vercel (staging)
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        working-directory: ./web-app
+        scope: ${{ secrets.VERCEL_ORG_ID }}
+        
+    - name: Deploy server to Railway (staging)
+      uses: railwayapp/railway-deploy@v3
+      with:
+        railway-token: ${{ secrets.RAILWAY_TOKEN }}
+        service: claude-code-server-staging
+        
+    - name: Run staging health checks
+      run: |
+        sleep 30
+        curl -f ${{ secrets.STAGING_WEB_URL }}/health || exit 1
+        curl -f ${{ secrets.STAGING_SERVER_URL }}/health || exit 1
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: web-build
+        path: web-app/.next/
+        
+    - name: Deploy web app to Vercel (production)
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        vercel-args: '--prod'
+        working-directory: ./web-app
+        scope: ${{ secrets.VERCEL_ORG_ID }}
+        
+    - name: Deploy server to Railway (production)
+      uses: railwayapp/railway-deploy@v3
+      with:
+        railway-token: ${{ secrets.RAILWAY_TOKEN }}
+        service: claude-code-server-production
+        
+    - name: Update mobile app via CodePush
+      run: |
+        cd mobile-app
+        npx code-push release-react claude-code-ios ios --deploymentName Production
+        npx code-push release-react claude-code-android android --deploymentName Production
+      env:
+        CODEPUSH_ACCESS_KEY: ${{ secrets.CODEPUSH_ACCESS_KEY }}
+        
+    - name: Run production health checks
+      run: |
+        sleep 60
+        curl -f ${{ secrets.PRODUCTION_WEB_URL }}/health || exit 1
+        curl -f ${{ secrets.PRODUCTION_SERVER_URL }}/health || exit 1
+        
+    - name: Send TTS notification
+      run: |
+        cd Script
+        bash tts.sh speak "Production deployment completed successfully" normal
+        
+    - name: Notify deployment success
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        text: '🚀 Claude Code deployed to production successfully!'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [deploy-production]
+    environment: production
+    
+    steps:
+    - name: Rollback Vercel deployment
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        vercel-args: '--rollback'
+        working-directory: ./web-app
+        
+    - name: Rollback Railway deployment
+      run: |
+        railway rollback --service claude-code-server-production
+      env:
+        RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        
+    - name: Send failure notification
+      run: |
+        cd Script
+        bash tts.sh error "Production deployment failed - rollback initiated"
+        
+    - name: Notify rollback
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        text: '⚠️ Claude Code deployment failed - rollback initiated'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  post-deploy:
+    name: Post-Deployment Tasks
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Update monitoring dashboards
+      run: |
+        curl -X POST "${{ secrets.GRAFANA_WEBHOOK_URL }}" \
+          -H "Content-Type: application/json" \
+          -d '{"text":"Claude Code v'$(git describe --tags --always)' deployed to production"}'
+        
+    - name: Run post-deployment tests
+      run: |
+        cd tests  
+        npm run test:production
+        
+    - name: Update documentation
+      run: |
+        echo "Deployment completed at $(date)" >> DEPLOYMENT_LOG.md
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add DEPLOYMENT_LOG.md
+        git commit -m "Update deployment log" || exit 0
+        git push
+        
+    - name: Clean up old artifacts
+      run: |
+        # Clean up build artifacts older than 7 days
+        find . -name "*.log" -mtime +7 -delete
+        find . -name "node_modules" -type d -exec rm -rf {} + 2>/dev/null || true

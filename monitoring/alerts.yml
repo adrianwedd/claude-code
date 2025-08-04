@@ -1,0 +1,112 @@
+groups:
+  - name: claude-code-alerts
+    rules:
+      # High memory usage alert
+      - alert: HighMemoryUsage
+        expr: (nodejs_memory_heap_used_bytes / nodejs_memory_heap_total_bytes) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: claude-code-server
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is above 80% for more than 5 minutes. Current usage: {{ $value }}%"
+
+      # High CPU usage alert
+      - alert: HighCPUUsage
+        expr: rate(nodejs_cpu_user_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: claude-code-server
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is above 80% for more than 5 minutes. Current usage: {{ $value }}%"
+
+      # Service down alert
+      - alert: ServiceDown
+        expr: up{job="claude-code-server"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: claude-code-server
+        annotations:
+          summary: "Claude Code server is down"
+          description: "The Claude Code WebSocket server has been down for more than 2 minutes"
+
+      # Database connection alert
+      - alert: DatabaseConnectionFailed
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: postgres
+        annotations:
+          summary: "Database connection failed"
+          description: "Cannot connect to PostgreSQL database for more than 1 minute"
+
+      # Redis connection alert
+      - alert: RedisConnectionFailed
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis connection failed"
+          description: "Cannot connect to Redis cache for more than 1 minute"
+
+      # High WebSocket connection count
+      - alert: HighWebSocketConnections
+        expr: websocket_connections_total > 1000
+        for: 10m
+        labels:
+          severity: warning
+          service: claude-code-server
+        annotations:
+          summary: "High WebSocket connection count"
+          description: "WebSocket connections exceed 1000. Current count: {{ $value }}"
+
+      # Low disk space alert (if node_exporter is available)
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Low disk space"
+          description: "Disk space is below 10%. Available: {{ $value }}%"
+
+      # High response time alert
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: claude-code-server
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is above 2 seconds. Current: {{ $value }}s"
+
+      # SSL certificate expiration (if applicable)
+      - alert: SSLCertificateExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 86400 * 30
+        for: 1h
+        labels:
+          severity: warning
+          service: ssl
+        annotations:
+          summary: "SSL certificate expiring soon"
+          description: "SSL certificate will expire in less than 30 days"
+
+      # Rate limiting threshold
+      - alert: HighRateLimitHits
+        expr: rate(rate_limit_hits_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: claude-code-server
+        annotations:
+          summary: "High rate limit hits detected"
+          description: "Rate limiting is being triggered frequently. Rate: {{ $value }} hits/sec"

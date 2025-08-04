@@ -1,0 +1,191 @@
+{
+  "monitors": [
+    {
+      "name": "Claude Code - Main Service",
+      "type": "http",
+      "url": "https://claude-code.com/health",
+      "interval": 60,
+      "retryInterval": 60,
+      "maxRetries": 3,
+      "upsideDown": false,
+      "ignoreTls": false,
+      "timeout": 48,
+      "maxRedirects": 10,
+      "accepted_statuscodes": ["200-299"],
+      "method": "GET",
+      "body": "",
+      "headers": "",
+      "keyword": "healthy",
+      "tags": ["production", "main", "health"]
+    },
+    {
+      "name": "Claude Code - WebSocket",
+      "type": "websocket",
+      "url": "wss://claude-code.com/socket.io/",
+      "interval": 120,
+      "retryInterval": 120,
+      "maxRetries": 3,
+      "timeout": 48,
+      "tags": ["production", "websocket", "realtime"]
+    },
+    {
+      "name": "Claude Code - API Readiness",
+      "type": "http",
+      "url": "https://claude-code.com/ready",
+      "interval": 300,
+      "retryInterval": 60,
+      "maxRetries": 2,
+      "ignoreTls": false,
+      "timeout": 30,
+      "accepted_statuscodes": ["200"],
+      "method": "GET",
+      "keyword": "ready",
+      "tags": ["production", "readiness"]
+    },
+    {
+      "name": "Claude Code - Database Health",
+      "type": "http",
+      "url": "https://claude-code.com/health",
+      "interval": 180,
+      "retryInterval": 60,
+      "maxRetries": 3,
+      "timeout": 30,
+      "accepted_statuscodes": ["200", "503"],
+      "method": "GET",
+      "jsonPath": "$.checks.database.status",
+      "expectedValue": "ok",
+      "tags": ["production", "database", "postgres"]
+    },
+    {
+      "name": "Claude Code - Redis Health",
+      "type": "http",
+      "url": "https://claude-code.com/health",
+      "interval": 180,
+      "retryInterval": 60,
+      "maxRetries": 3,
+      "timeout": 30,
+      "accepted_statuscodes": ["200", "503"],
+      "method": "GET",
+      "jsonPath": "$.checks.redis.status",
+      "expectedValue": "ok",
+      "tags": ["production", "cache", "redis"]
+    },
+    {
+      "name": "Claude Code - SSL Certificate",
+      "type": "http",
+      "url": "https://claude-code.com",
+      "interval": 86400,
+      "retryInterval": 3600,
+      "maxRetries": 1,
+      "ignoreTls": false,
+      "timeout": 30,
+      "expiryNotification": true,
+      "tags": ["production", "ssl", "security"]
+    },
+    {
+      "name": "Claude Code - Staging",
+      "type": "http",
+      "url": "https://claude-code-staging.vercel.app/health",
+      "interval": 300,
+      "retryInterval": 120,
+      "maxRetries": 2,
+      "timeout": 30,
+      "accepted_statuscodes": ["200-299"],
+      "method": "GET",
+      "keyword": "healthy",
+      "tags": ["staging", "vercel"]
+    }
+  ],
+  "notifications": [
+    {
+      "name": "Email Alerts",
+      "type": "smtp",
+      "isDefault": true,
+      "applyExisting": true,
+      "smtpHost": "smtp.mailgun.org",
+      "smtpPort": 587,
+      "smtpSecure": false,
+      "smtpIgnoreTLSError": false,
+      "smtpDkimDomain": "",
+      "smtpDkimKeySelector": "",
+      "smtpDkimPrivateKey": "",
+      "smtpUsername": "${SMTP_USERNAME}",
+      "smtpPassword": "${SMTP_PASSWORD}",
+      "emailFrom": "alerts@claude-code.com",
+      "emailTo": "team@claude-code.com",
+      "emailSubject": "Claude Code Alert: {{MONITOR_NAME}} is {{STATUS}}",
+      "emailBody": "Monitor: {{MONITOR_NAME}}\nStatus: {{STATUS}}\nMessage: {{MSG}}\nTime: {{DATETIME}}\nURL: {{MONITOR_URL}}"
+    },
+    {
+      "name": "Slack Alerts",
+      "type": "slack",
+      "isDefault": true,
+      "applyExisting": true,
+      "slackWebhookURL": "${SLACK_WEBHOOK_URL}",
+      "slackChannel": "#alerts",
+      "slackUsername": "Claude Code Monitor",
+      "slackIconEmoji": ":warning:",
+      "slackIconUrl": "",
+      "alertMessage": "🚨 {{MONITOR_NAME}} is {{STATUS}}\n📊 {{MSG}}\n🕐 {{DATETIME}}",
+      "recoveryMessage": "✅ {{MONITOR_NAME}} is back online\n🕐 {{DATETIME}}"
+    },
+    {
+      "name": "Discord Alerts",
+      "type": "discord",
+      "isDefault": false,
+      "applyExisting": false,
+      "discordWebhookUrl": "${DISCORD_WEBHOOK_URL}",
+      "discordUsername": "Claude Code Monitor",
+      "discordPrefixMessage": "",
+      "alertMessage": "🚨 **{{MONITOR_NAME}}** is **{{STATUS}}**\n📊 {{MSG}}\n🕐 {{DATETIME}}",
+      "recoveryMessage": "✅ **{{MONITOR_NAME}}** is back online\n🕐 {{DATETIME}}"
+    }
+  ],
+  "maintenance": [
+    {
+      "title": "Weekly Maintenance Window",
+      "description": "Scheduled maintenance and updates",
+      "strategy": "recurring-weekday",
+      "weekdays": [1],
+      "daysOfMonth": [],
+      "startTime": "02:00",
+      "endTime": "04:00",
+      "timezone": "America/New_York",
+      "active": true
+    }
+  ],
+  "settings": {
+    "checkBeta": false,
+    "checkUpdate": true,
+    "keepDataPeriodDays": 180,
+    "serverTimezone": "UTC",
+    "searchEngineIndexEnabled": false,
+    "primaryBaseURL": "https://uptime.claude-code.com",
+    "steamAPIKey": "",
+    "databasePath": "./data/kuma.db",
+    "nscd": false,
+    "chromeExecutable": "",
+    "tlsExpiryNotifyDays": [7, 14, 21],
+    "disableAuth": false
+  },
+  "statusPage": {
+    "title": "Claude Code Status",
+    "description": "Real-time status and uptime monitoring for Claude Code services",
+    "theme": "dark",
+    "published": true,
+    "showTags": true,
+    "domainNameList": ["status.claude-code.com"],
+    "customCSS": "",
+    "footerText": "© 2024 Claude Code - Powered by Uptime Kuma",
+    "showPoweredBy": true,
+    "googleAnalyticsId": "",
+    "incident": {
+      "enableIncidentPage": true,
+      "template": {
+        "style": "warning",
+        "title": "Service Incident",
+        "content": "We are currently experiencing issues with our services. Our team is working to resolve this as quickly as possible."
+      }
+    }
+  }
+}

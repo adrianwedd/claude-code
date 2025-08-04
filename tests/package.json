@@ -1,0 +1,37 @@
+{
+  "name": "claude-code-tests",
+  "version": "1.0.0",
+  "description": "Integration and end-to-end tests for Claude Code",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "test:integration": "jest integration/",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:performance": "jest --testNamePattern='Performance'",
+    "test:security": "jest --testNamePattern='Security'"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.7.5",
+    "axios": "^1.7.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.12"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testTimeout": 30000,
+    "setupFilesAfterEnv": ["<rootDir>/jest.setup.js"],
+    "collectCoverageFrom": [
+      "../server/**/*.js",
+      "../web-app/src/**/*.{js,jsx,ts,tsx}",
+      "../mobile-app/src/**/*.{js,jsx,ts,tsx}",
+      "!**/node_modules/**"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.(js|jsx|ts|tsx)",
+      "**/*.(test|spec).(js|jsx|ts|tsx)"
+    ]
+  }
+}
