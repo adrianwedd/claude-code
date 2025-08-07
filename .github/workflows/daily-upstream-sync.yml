@@ -1,0 +1,34 @@
+name: Daily Upstream Sync
+
+on:
+  schedule:
+    # Runs daily at 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Fetch all history for rebase
+          fetch-depth: 0
+          # Use GITHUB_TOKEN for authentication
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/anthropics/claude-code.git || true
+
+      - name: Fetch upstream changes
+        run: git fetch upstream
+
+      - name: Rebase main onto upstream/main
+        run: |
+          git rebase upstream/main
+
+      - name: Push changes to origin
+        run: git push origin main --force-with-lease
